@@ -17,94 +17,133 @@ using InventorySystem.Items.ThrowableProjectiles;
 using InventorySystem.Items.Pickups;
 using static RoundSummary;
 using Mirror;
+using PluginAPI.Events;
 
 namespace FriendlyFireDetector
 {
 	public class Handler
 	{
-		public readonly Dictionary<string, RoleTypeId> PreviousRoles = new Dictionary<string, RoleTypeId>();
-		public readonly Dictionary<string, RoleTypeId> Roles = new Dictionary<string, RoleTypeId>();
+		public class FFCount : IComparable
+		{
+			public FFCount(int count)
+			{
+				Count = count;
+			}
+
+
+
+
+
+			public int Count { get; internal set; }
+			public DateTime LastUpdate { get; internal set; }
+
+			public void UpdateCount()
+			{
+				Count++;
+				LastUpdate = DateTime.Now;
+			}
+
+
+
+
+
+			public int CompareTo(object other)
+			{
+				throw new NotImplementedException();
+			}
+		}
+
 		public readonly Dictionary<string, List<GrenadeThrowerInfo>> grenadeInfo = new Dictionary<string, List<GrenadeThrowerInfo>>();
 		public readonly Dictionary<string, FFInfo> ffInfo = new Dictionary<string, FFInfo>();
 		public static bool RoundInProgess = false;
 
 		[PluginEvent(ServerEventType.PlayerSpawn)]
-		public void PlayerSpawned(Player player, RoleTypeId role)
+		public void PlayerSpawned(PlayerSpawnEvent args)
 		{
-			if (player == null || player.IsServer || player.UserId == null || role == RoleTypeId.None)
+			if (args.Player == null || args.Player.IsServer || args.Player.UserId == null || args.Role == RoleTypeId.None)
 				return;
 
-			if (Roles.ContainsKey(player.UserId))
-				Roles[player.UserId] = role;
-			else Roles.Add(player.UserId, role);
+			if (args.Player.TemporaryData.Contains("ffdprevrole"))
+				args.Player.TemporaryData.Override("ffdprevrole", ((int)args.Player.Role).ToString());
+			else
+				args.Player.TemporaryData.Add("ffdprevrole", ((int)args.Player.Role).ToString());
 		}
 
 		[PluginEvent(ServerEventType.PlayerDamage), PluginPriority(LoadPriority.Highest)]
-		public bool PlayerDamageEvent(Player victim, Player attacker, DamageHandlerBase damageHandler)
+		public bool PlayerDamageEvent(PlayerDamageEvent args)
 		{
-			if (Plugin.Paused || !RoundInProgess || attacker == null || victim == null || !(damageHandler is AttackerDamageHandler aDH) || aDH == null || aDH.Attacker.LogUserID == null || victim.IsServer || aDH.Attacker.LogUserID == victim.UserId)
+			if (Plugin.Paused || !RoundInProgess || args.Target == null || args.Player == null || args.Player.IsServer || args.Player.IsSCP || args.Player.IsTutorial || args.Player.UserId == args.Target.UserId || !(args.DamageHandler is AttackerDamageHandler aDH))
 				return true;
 
-			if (attacker == null && Roles.ContainsKey(aDH.Attacker.LogUserID))
-				return false;
+			RoleTypeId prevRole = RoleTypeId.None;
 
-			if (!IsFF(victim.Role, attacker.Role))
+			if (args.Player.TemporaryData.TryGet("ffdprevrole", out string roleStr))
+				prevRole = (RoleTypeId)int.Parse(roleStr);
+
+			//Checks both the attacker's current role and possible previous roles for if it is considered FF against the target's role
+			if (!IsFF(args.Target.Role, args.Player.Role, prevRole))
 				return true;
 
-			List<Player> friendlies = new List<Player>();
-			List<Player> hostiles = new List<Player>();
+			int friendlies = 0;
+			int hostiles = 0;
 
-			foreach (var plr in GetNearbyPlayers(attacker))
+			foreach (var plr in GetNearbyPlayers(args.Player))
 			{
-				if (IsFF(plr.Role, attacker.Role))
-					friendlies.Add(plr);
-				else hostiles.Add(plr);
+				if (IsFF(plr.Role, args.Player.Role, prevRole))
+					friendlies++;
+				else
+					hostiles++;
 			}
 
-			if (hostiles.Count > 0)
+			if (hostiles > 0)
 			{
 				return true;
 			}
 			else
 			{
-				if (attacker.TemporaryData.Contains("ffdstop"))
-					attacker.TemporaryData.Override("ffdstop", $"{aDH.Damage}");
-				else
-					attacker.TemporaryData.Add<string>("ffdstop", $"{aDH.Damage}");
+				args.Player.TemporaryData.Override("ffdstop", $"{aDH.Damage}");
 
-				//attacker.Damage(5, "FFD Reversal");
+				if (args.Player.TemporaryData.TryGet("ffdcount", out FFCount data))
+				{
+					data.Count++;
+					args.Player.TemporaryData.Override("ffdcount", data);
+				}
+				else
+				{
+					args.Player.TemporaryData.Add("ffcount", new FFCount(1));
+				}
 
 				return false;
 			}
 		}
 
-		[PluginEvent(ServerEventType.PlayerDamagedShootingTarget)]
-		public void TargetDamagedEvent(Player attacker, ShootingTarget target, DamageHandlerBase damageHandler, float amount)
+		public bool IsFF(RoleTypeId victim, RoleTypeId attacker, RoleTypeId atkrPrevRole = RoleTypeId.None)
 		{
-			if (target.CommandName.ToLowerInvariant().Contains("dboy"))
-				UpdateLegitDamage(attacker, false);
-			if (target.CommandName.ToLowerInvariant().Contains("sport"))
-			{
-				UpdateFFDamage(attacker);
-				HandlePunishments(attacker, amount);
-			}
-		}
-
-		public bool IsFF(RoleTypeId victim, RoleTypeId attacker)
-		{
-			if ((victim == RoleTypeId.ClassD || isChaos(victim)) && (attacker == RoleTypeId.ClassD || isChaos(attacker)))
+			if ((victim == RoleTypeId.ClassD || IsChaos(victim)) && (attacker == RoleTypeId.ClassD || IsChaos(attacker)))
 			{
 				if (victim == RoleTypeId.ClassD && attacker == RoleTypeId.ClassD)
 					return false;
 				return true;
 			}
-			else if ((victim == RoleTypeId.Scientist || isMtf(victim)) && (attacker == RoleTypeId.Scientist || isMtf(attacker)))
+			else if ((victim == RoleTypeId.Scientist || IsMTF(victim)) && (attacker == RoleTypeId.Scientist || IsMTF(attacker)))
 				return true;
+
+			if (atkrPrevRole != RoleTypeId.None && atkrPrevRole != RoleTypeId.Spectator)
+			{
+				if ((victim == RoleTypeId.ClassD || IsChaos(victim)) && (atkrPrevRole == RoleTypeId.ClassD || IsChaos(attacker)))
+				{
+					if (victim == RoleTypeId.ClassD && atkrPrevRole == RoleTypeId.ClassD)
+						return false;
+					return true;
+				}
+				else if ((victim == RoleTypeId.Scientist || IsMTF(victim)) && (attacker == RoleTypeId.Scientist || IsMTF(attacker)))
+					return true;
+			}
 
 			return false;
 		}
 
-		private bool isChaos(RoleTypeId role)
+		private bool IsChaos(RoleTypeId role)
 		{
 			switch (role)
 			{
@@ -118,7 +157,7 @@ namespace FriendlyFireDetector
 			}
 		}
 
-		private bool isMtf(RoleTypeId role)
+		private bool IsMTF(RoleTypeId role)
 		{
 			switch (role)
 			{
@@ -133,96 +172,11 @@ namespace FriendlyFireDetector
 			}
 		}
 
-		private bool isSCP(RoleTypeId role)
-		{
-			switch (role)
-			{
-				case RoleTypeId.Scp173:
-				case RoleTypeId.Scp106:
-				case RoleTypeId.Scp049:
-				case RoleTypeId.Scp079:
-				case RoleTypeId.Scp096:
-				case RoleTypeId.Scp0492:
-				case RoleTypeId.Scp939:
-					return true;
-				default:
-					return false;
-			}
-		}
-
-		public FFInfo GetInfo(Player player)
-		{
-			if (!ffInfo.ContainsKey(player.UserId))
-				ffInfo.Add(player.UserId, new FFInfo());
-
-			return ffInfo[player.UserId];
-		}
-
-		public void UpdateLegitDamage(Player player, bool updateTime = true)
-		{
-			FFInfo info = GetInfo(player);
-
-			info.Value = Mathf.Clamp(info.Value - 1, -5, 15);
-			if (updateTime)
-				info.LastUpdate = DateTime.Now;
-		}
-
-		public void UpdateFFDamage(Player player)
-		{
-			FFInfo info = GetInfo(player);
-
-			info.Value = Mathf.Clamp(info.Value + 1, -5, 15);
-		}
-
-		public void HandlePunishments(Player player, float damage)
-		{
-			FFInfo info = GetInfo(player);
-
-			if (info.Value > 2)
-				player.Damage(damage, "Anti-FF: Damage reversal due to friendly fire");
-			if (info.Value > 4)
-				player.DropEverything();
-			if (info.Value > 6)
-			{
-				player.EffectsManager.EnableEffect<Deafened>(info.Value);
-				player.EffectsManager.EnableEffect<Blinded>(info.Value);
-				player.EffectsManager.EnableEffect<Disabled>(info.Value * 2);
-			}
-			if (info.Value > 9)
-			{
-				player.Kill();
-			}
-			if (info.Value > 12)
-			{
-				player.Kick("Anti-FF: Automatic kick for too much friendly damage");
-			}
-			if (info.Value > 14)
-			{
-				player.Ban("Anti-FF: Automatic ban for too much friendly damage", 1440 * 60);
-			}
-		}
-
-		[PluginEvent(ServerEventType.PlayerDamagedShootingTarget)]
-		public void PlayerShootTarget(Player player, ShootingTarget target, DamageHandlerBase damageHandler, float damageAmount)
-		{
-			try
-			{
-				if (player.TemporaryData.Contains("ffdstop"))
-					player.TemporaryData.Override("ffdstop", $"{damageAmount}");
-				else
-					player.TemporaryData.Add<string>("ffdstop", $"{damageAmount}");
-			}
-			catch (Exception e)
-			{
-				Log.Error(e.ToString());
-			}
-		}
-
 		/// <summary>
 		/// Gets a list of all players close to the attacker (100 meters for Surface, 50 for the facility)
 		/// </summary>
 		/// <returns></returns>
-		public List<Player> GetNearbyPlayers(Player atkr)
+		public List<Player> GetNearbyPlayers(Player atkr, bool rangeOnly = false)
 		{
 			float distanceCheck = atkr.Position.y > 900 ? 70 : 35;
 			List<Player> nearbyPlayers = new List<Player>();
@@ -233,10 +187,16 @@ namespace FriendlyFireDetector
 					continue;
 
 				var distance = Vector3.Distance(atkr.Position, plr.Position);
-				var angle = Vector3.Angle(atkr.GameObject.transform.forward, atkr.Position - plr.Position);
 
-				if ((distance <= distanceCheck && angle > 130) || distance < 5)
+				if (rangeOnly && distance <= distanceCheck)
 					nearbyPlayers.Add(plr);
+				else
+				{
+					var angle = Vector3.Angle(atkr.GameObject.transform.forward, atkr.Position - plr.Position);
+
+					if ((distance <= distanceCheck && angle > 130) || distance < 5)
+						nearbyPlayers.Add(plr);
+				}
 			}
 
 			return nearbyPlayers;
