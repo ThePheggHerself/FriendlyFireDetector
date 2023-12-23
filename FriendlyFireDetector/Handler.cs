@@ -30,10 +30,6 @@ namespace FriendlyFireDetector
 				Count = count;
 			}
 
-
-
-
-
 			public int Count { get; internal set; }
 			public DateTime LastUpdate { get; internal set; }
 
@@ -42,10 +38,6 @@ namespace FriendlyFireDetector
 				Count++;
 				LastUpdate = DateTime.Now;
 			}
-
-
-
-
 
 			public int CompareTo(object other)
 			{
