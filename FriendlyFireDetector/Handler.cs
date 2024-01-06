@@ -128,7 +128,7 @@ namespace FriendlyFireDetector
 						return false;
 					return true;
 				}
-				else if ((victim == RoleTypeId.Scientist || IsMTF(victim)) && (attacker == RoleTypeId.Scientist || IsMTF(attacker)))
+				else if ((victim == RoleTypeId.Scientist || IsMTF(victim)) && (atkrPrevRole == RoleTypeId.Scientist || IsMTF(atkrPrevRole)))
 					return true;
 			}
 
