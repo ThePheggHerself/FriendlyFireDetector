@@ -178,15 +178,16 @@ namespace FriendlyFireDetector
 				if (plr.IsServer || plr.Role == RoleTypeId.Spectator)
 					continue;
 
-				var distance = Vector3.Distance(atkr.Position, plr.Position);
+                //Using SqrMagnitude instead of distance because I want to feel like I'm contributing :) - SpiderBuh
+                var distance = Vector3.SqrMagnitude(plr.Position - atkr.Position);
 
-				if (rangeOnly && distance <= distanceCheck)
+				if (rangeOnly && distance <= distanceCheck * distanceCheck) //Square the distance check
 					nearbyPlayers.Add(plr);
 				else
 				{
 					var angle = Vector3.Angle(atkr.GameObject.transform.forward, atkr.Position - plr.Position);
 
-					if ((distance <= distanceCheck && angle > 130) || distance < 5)
+					if ((distance <= distanceCheck * distanceCheck && angle > 130) || distance < 5*5)
 						nearbyPlayers.Add(plr);
 				}
 			}
@@ -204,9 +205,9 @@ namespace FriendlyFireDetector
 				if (plr.IsServer || plr.Role == RoleTypeId.Spectator)
 					continue;
 
-				var distance = Vector3.Distance(position, plr.Position);
+                var distance = Vector3.SqrMagnitude(plr.Position - position);
 
-				if (distance <= distanceCheck)
+                if (distance <= distanceCheck * distanceCheck)
 					nearbyPlayers.Add(plr);
 			}
 
